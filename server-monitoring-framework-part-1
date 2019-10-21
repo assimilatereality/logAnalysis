@@ -1,0 +1,191 @@
+# The predictive capabilities of R can be used to proactively predict and address issues. 
+# The following framework can be modified for many potential uses and aims to reduce 
+# reactive responses in favor of proactivity.
+
+# The use case presented here is simple, but can be altered subject only to your innovation. 
+# It is written to monitor local drive space (part 1), store the data in a relational database
+# (part 2), and provide historical, visual output of servers that may need attention (part 3).
+
+# Testing has been with R version 3.5.2 on a MacBook Pro version 10.14.1. Servers are various 
+# flavors of Linux. R packages used are
+
+# ssh.utils 1.0
+# tibble 1.4.2
+# RPostgreSQL 0.6-2
+# magrittr 1.5
+# dplyr 0.7.7
+# ggplot2 3.1.0
+# trelliscopejs 0.1.18
+
+# Part 1: Get and process the data
+
+# Load the packages used in this part:
+
+library(tibble)
+library(ssh.utils)
+
+# fnScan is the workhorse function and needs to come before it is called. 'svrNames' is a 
+# list of servers that will be selected after the function is presented.
+
+fnScan <- function (svrNames) {
+
+   # Create empty lists used by the function
+
+   dflist = list()
+   scanList = list()
+
+   # Next access each server and run a command locally on each server. 
+
+   for (svr in svrNames) {
+
+   # 'df -Pl' pulls information for only local drives.  '%s' is replaced by the value of 'svr'.
+
+    rst <-
+      run.remote(
+        "df -Pl",
+        remote = sprintf('rtigges@%s.sec.ibm.com', svr),
+        intern = T,
+        stderr.redirect = F,
+        verbose = T
+      )
+
+    # Uncomment the next line to have "df -Pl" printed as each server is processed
+    #print(rst[["cmd.out"]])
+
+    # Drop the first row
+
+    rst$cmd.out <- rst$cmd.out[-1]
+
+    # Create an empty dataframe
+
+    dfrst <- data.frame(matrix(ncol = 6, nrow = 0))
+    x <- c("Filesystem", "Size", "Used", "Avail", "Use%", "Mounted on")
+    colnames(dfrst) <- x
+
+    # Yes, 'g' and 'h' are generally bad names for variables, but the trade-off
+    # here is (1) they are in a function and not hanging around and (2) it makes
+    # them really easy to spot in the two sections that have them below
+
+    # str_squish removes leading, trailing and extra middle whitespace
+
+    g <- strsplit(str_squish(rst$cmd.out[1]), " ")
+
+    names(g[[1]]) <-
+      c("Filesystem", "Size", "Used", "Avail", "Use%", "Mounted on")
+
+    h <- data.frame(as.list(g[[1]]))
+
+    dfrst2 <- rbind(dfrst, h)
+
+    whiand run a command locally on each server. le (length(rst$cmd.out) > 1) {
+      rst$cmd.out <- rst$cmd.out[-1]
+      g <- strsplit(str_squish(rst$cmd.out[1]), " ")
+      names(g[[1]]) <-
+        c("Filesystem", "Size", "Used", "Avail", "Use%", "Mounted on")
+      h <- data.frame(as.list(g[[1]]))
+      dfrst2 <- rbind(dfrst, h)
+    } # end of while loop
+
+    #Add svr name, time, and svr type to dataframe
+
+    dfrst2$svr <- svr
+    dfrst2$datetime <- Sys.time()
+    dfrst2$type[dfrst2$svr %in% svrNamesTDI] <- 'tdi'
+    dfrst2$type[dfrst2$svr %in% svrNamesWAS] <- 'was'
+
+    # Create 'datetime--svr' name for data frame
+
+    y <- str_c(c(as.character(Sys.time()), svr), collapse = "--")
+
+    # Add 'datetime--svr' data frame to list of data frames
+
+    dflist[[y]] <- dfrst2
+
+  } # end of for loop
+
+  # Combine dataframes in list of dataframes to a new dataframe
+
+  df <- dplyr::bind_rows(dflist)
+
+  # Creand run a command locally on each server. ate 'datetime--svrType' name for data frame
+
+  z <- str_c(c(as.character(Sys.time()), svrType), collapse = "--")
+
+  # Add 'datetime--svr' data frame to list of data frames
+
+  scanList[[z]] <- df
+
+  #return to glblScanList variable  
+
+  return(scanList) 
+
+
+} # end of function
+
+and run a command locally on each server. 
+# Create lists of servers
+
+svrNamesTDI <- c("dc1-prd-tdisvr-01",
+                 "dc1-prd-tdisvr-02",
+                 "dc2-prd-tdisvr-01"             
+)
+
+svrNamesWAS <- c("dc2-prd-wassvr-01",
+                 "dc2-prd-wassvr-02",
+                 "dc3-prd-wassvr-01",
+                 "dc3-prd-wassvr-02"
+)
+
+
+# Select server type or all
+
+svrType <- readline(prompt = "Which svr type? (tdi, was, a[ll]) :  ")
+
+if (svrType == "tdi") {
+  svrNames <- svrNamesTDI
+  glblScanList <- fnScan(svrNames)
+} else if (svrType == "was") {
+  svrNames <- svrNamesWAS
+  glblScanList <- fnScan(svrNames)
+} else if (svrType == "a") {
+  svrNames <-
+    c(svrNamesTDI,
+      svrNamesWAS)
+  glblScanList <- fnScan(svrNames)
+
+# 'stop' prints the Usage statement and ends the program
+
+} else {
+  stop("Usage: Launch script, then enter the server type - tdi, was, or a[ll]")
+}
+
+# Combine dataframes in the list of dataframes to a new dataframe
+
+dfScan <- dplyr::bind_rows(glblScanList)
+
+# 'dfScan$Use.' is a percent. Ex. '48%'. Drop '%' and change it to a number.
+
+dfScan$Use. <- as.numeric(str_sub(dfScan$Use., 1, str_length(dfScan$Use.)-1))
+
+# Convert numbers of bytes to kibibytes
+
+dfScan$Size <- round(as.numeric(str_sub(dfScan$Size,1,str_length(dfScan$Size)))/1024, digits = 1)
+dfScan$Avail <- round(as.numeric(str_sub(dfScan$Avail,1,str_length(dfScan$Avail)))/1024, digits = 1)
+dfScan$Used <- round(as.numeric(str_sub(dfScan$Used,1,str_length(dfScan$Used)))/1024, digits = 1)
+
+# Function to convert names to R safe names
+
+dbSafeNames = function(names) {
+  names = gsub('[^a-z0-9]+','_',tolower(names))
+  names = make.names(names, unique=TRUE, allow_=TRUE)
+  names = gsub('.','_',names, fixed=TRUE)
+  names
+}
+
+colnames(dfScan) = dbSafeNames(colnames(dfScan))
+
+# Convert row names (row numbers here) to column 'id' values
+
+dfScan <- rownames_to_column(dfScan, var = "id")
+
+print(head(dfScan))
