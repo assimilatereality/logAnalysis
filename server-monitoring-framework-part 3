@@ -1,0 +1,49 @@
+# Part 3: Create graphs for interesting servers
+
+# *TrelliscopeJS is an awesome addition to ggplot2.  Free plug: Datacamp has a course by the creator.
+
+# Load the packages used in this part:
+
+library(dplyr)
+library(ggplot2)
+library(trelliscopejs)
+
+# Set the level, above which is deemed interesting
+
+fltr <- readline(prompt = "Filter drive space % used >= : ")
+fltr <- as.numeric(fltr)
+
+ttl <- paste("Drive Space (Black)")
+
+# df_postgres is from Part 2
+
+dfFromPostgres <- df_postgres %>%
+  group_by(svr, mounted_on) %>%
+
+     #filter(any(...)) evaluates at the group_by() level,
+     #filter(...) evaluates at the rowwise() level, even when preceded by group_by().
+
+  filter(any(use_ >= fltr)) %>%
+  arrange(svr, mounted_on, desc(datetime)) %>%
+
+  # The following number is the number of datapoints to be in the graph
+
+  do(head(., 20))
+
+# 'as_plotly = TRUE' enables hovering over a datapoint to see its value
+
+print(dfFromPostgres %>%
+  ggplot(aes(datetime, use_)) +
+             geom_point() +
+             geom_line() +
+             ylim(0, 100) +
+             labs(y = "Percentage used",
+             title = ttl,
+             subtitle = "65 % (Orange), 90% (Red), 95 % (Green), 100% (Black)",
+             caption = "Time is GMT") +
+             facet_trelliscope( ~ mounted_on + svr, nrow = 1, ncol = 1, as_plotly = TRUE) +
+             geom_hline(aes(yintercept = 100), col = c("black")) +
+             geom_hline(aes(yintercept = 95), col = c("green")) +
+             geom_hline(aes(yintercept = 90), col = c("red")) +
+             geom_hline(aes(yintercept = 65), col = c("orange"))
+)
