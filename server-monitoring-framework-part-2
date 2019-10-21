@@ -1,0 +1,56 @@
+# Part 2: Save to and Retrieve server monitor data from PostgreSQL
+
+# PostgreSQL is a well documented (on the website and forums) open source relational 
+# database. Installation is presumed and out of the scope of this article. The table 
+# used below was created with this command:
+
+#CREATE TABLE DFSPACE(
+#  id SERIAL PRIMARY KEY, 
+#  filesystem TEXT NOT NULL,
+#  size TEXT NOT NULL,
+#  used numeric not null,
+#  avail text not null,
+#  use_ numeric not null,
+#  mounted_on text not null,
+#  svr text not null,
+#  datetime timestamp not null,
+#  type text not null);
+
+# The column names match the feature names in the final dataframe 'dfScan' in Part 1.
+
+# Load the packages used in this part:
+
+library(RPostgreSQL)
+library(magrittr)
+
+# Connect to the database
+
+pw <- {"password01"}
+drv <- dbDriver("PostgreSQL")
+con <- dbConnect(drv, dbname = "svr_db",
+                 host = "localhost", port = 5432,
+                 user = "postgres", password = pw)
+rm(pw)
+
+# Confirm the table exists
+
+dbExistsTable(con, "dfspace")
+
+# Uncomment to overwrite the table contents
+
+#dbWriteTable(con, "dfspace",
+#             value = dfScan, overwrite = TRUE, row.names = FALSE)
+
+# Append to the table
+
+dbWriteTable(con, "dfspace",
+             value = dfScan, append = TRUE, row.names = FALSE)
+
+# Dump the table to a dataframe and remove the 'id' column
+
+df_postgres <- dbGetQuery(con, "SELECT * from dfspace")
+df_postgres <- df_postgres %>% dplyr::select(-id)
+
+# Disconnect from the database
+
+dbDisconnect(con)
