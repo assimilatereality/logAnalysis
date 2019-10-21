@@ -1,0 +1,276 @@
+# The Problem
+
+# On an IBM ISAM appliance, reviewing and analyzing logs by built-in capability is painful. 
+# The logs have a default size of 2 MB and, although that can be increased, they roll, 
+# making it potentially necessary to select multiple files for a given time period. Since 
+# they roll based on size and not at the same time on each peer, they are not synchronized 
+# for the time period covered. The appliances are intended to be redundantly installed with 
+# traffic load balanced between 2, 3, 4 or more, making log selection more difficult. Even 
+# with stickiness enabled for traffic, multiple appliances can be engaged due to application 
+# redirects and calls. Viewing logs in the web console means selecting one log among many 
+# from one appliance among peers, then selecting line numbers to display. The logs can be 
+# exported, but they are still multiple from the same and different appliances.
+
+# An external tool is needed to merge multiple logs into a unified view.
+
+# The following code collects multiple request logs from multiple appliances, merging them 
+# into a single data source, and preparing the data for analysis.
+
+# Example Log (Contrived)
+
+#Here are the first 10 lines from an example log - a starting point that you can consider to be from a single appliance.
+
+#24.115.14.94 - unauthenticated 26/Oct/2018:07:41:04 -0400 "GET / HTTP/1.1" 302 1676
+#54.13.27.32 - unauthenticated 26/Oct/2018:07:39:04 -0400 "GET / HTTP/1.1" 302 1676
+#77.163.231.101 - unauthenticated 26/Oct/2018:07:40:05 -0400 "GET / HTTP/1.1" 302 1676
+#71.145.201.102 - unauthenticated 26/Oct/2018:07:43:04 -0400 "GET / HTTP/1.1" 302 1676
+#21.2.223.47 - unauthenticated 26/Oct/2018:07:40:34 -0400 "GET /EATH/css/abcd-style.css HTTP/1.1" 200 7032
+#62.203.13.195 - unauthenticated 26/Oct/2018:07:41:43 -0400 "GET /EATH/css/abcd-style.css HTTP/1.1" 200 7032
+#21.2.223.47 - unauthenticated 26/Oct/2018:07:40:34 -0400 "GET /EATH/images/favicon.png HTTP/1.1" 404 114
+#62.203.13.195 - unauthenticated 26/Oct/2018:07:41:43 -0400 "GET /EATH/images/favicon.png HTTP/1.1" 404 114
+#21.2.223.47 - unauthenticated 26/Oct/2018:07:40:34 -0400 "GET /EATH/images/brand-logo.png HTTP/1.1" 200 6401
+#62.203.13.195 - unauthenticated 26/Oct/2018:07:41:43 -0400 "GET /EATH/images/brand-logo.png HTTP/1.1" 200 6401
+
+# The Code
+
+# R is versatile, meaning there is more than one way to do things. This is how I chose. 
+# I am running R version 3.5.0 and RStudio Server 1.1.456 on RHEL.
+
+# First, set the working directory. Everything without a specified path goes here.
+# set the working directory
+
+setwd("~/R/logAnalyzers/requestLogs")
+
+# Then load the packages that will be needed. I have the following versions installed:
+
+jsonlite 1.5
+stringr 1.3.1
+dplyr  0.7.6
+tidyr 0.8.1
+lubridate 1.7.4
+
+# function to load and install packages
+
+load_and_install = function(pkg){
+  if(!pkg %in% installed.packages()[,"Package"]) install.packages(pkg)
+  suppressPackageStartupMessages(library(pkg,character.only=TRUE))
+}
+
+# packages to be loaded
+
+pkgs <- c("jsonlite",
+          "stringr",
+          "dplyr",
+          "tidyr",
+          "lubridate"
+          )
+
+# load the packages
+
+lapply(pkgs, load_and_install)
+
+# Remote ISAM appliances should require credentials, so provide them.
+# Credentials for appliance access
+
+userId <-  readline(prompt = "Login ID:  ")
+pw <-  readline(prompt = "Password:  ")
+
+# There will be a list of dataframes, so next create an empty list.
+# Empty list for list of dataframes
+
+dflist = list()
+
+# This next section creates an appliance name based on a presumed naming standard. 
+# An example name produced would be 'ny1-dev-wscell1-0'. 
+# This is the root name for peer appliances that will be added to below to run through each in succession. 
+# It is presumed that the names are in sequence beginning with 1 and going to the number of appliances selected later.
+# List of appliance name parts - assumes a standard naming convention is being used
+# Change as needed
+
+svrOptions <-
+  list(
+    "ny1",
+    "ny2",
+    "prd",
+    "stage",
+    "dev",
+    "cell1",
+    "cell2"
+  )
+
+# select appliance name components, concatenate, and confirm
+
+parts <-
+  select.list(svrOptions,
+              multiple = TRUE,
+              title = "Select appliance name components in order separated by a space",
+              graphics = FALSE)
+partRemoteHost <-
+  str_c(parts[[1]], "-", parts[[2]], "-ws", parts[[3]], "-0")
+
+# Verify the name is correct
+
+keepPartRemoteHost <-
+  readline(prompt = str_c("partRemoteHost is ", partRemoteHost, ". Keep it? (yes/no) : "))
+
+if (substr(keepPartRemoteHost, 1, 1) == "n" ||
+    substr(keepPartRemoteHost, 1, 1) == "N")  {
+  partRemoteHost <-
+    readline(prompt = "Which appliance series (example: ny1-dev-wscell1-0): ")
+}
+
+# Next provide the number of appliances in the sequence.
+# To be used in the 'while' loop
+
+num_servers <-  as.integer(readline(prompt = "How many ISAM servers: "))
+
+# Then begin a 'while' loop. It will run through each appliance in sequence.
+
+while (num_servers != 0) {
+
+  # Complete the appliance name from the root name. Appliances have multiple ports and may 
+  # have one port in a DMZ and another internal for management. Hit the management port. 
+  # Expanding on the name created above, this will create 'ny1-dev-wscell1-03a', assuming 
+  # num_servers was set to 3. It will process appliances ...-03a, then -02a, then -01a in 
+  # that order.
+
+  # Finalize the name of the appliance for this loop
+  
+  remoteHost <- str_c(partRemoteHost, num_servers, 'a')
+
+  # Decrement 'while' clause control variable by 1
+  
+  num_servers <- as.integer(num_servers - 1)
+
+  # An appliance can host many reverse proxies. This next series of commands queries the 
+  # appliance for all proxies, provides a list, and asks for a selection.
+  # List Reverse Proxies, then select one
+  
+  proxyList <- fromJSON(pipe(sprintf("curl -s -k -H 'Accept:application/json' --user %s:%s -X GET https://%s.abc.com/wga/reverseproxy", userId, pw, remoteHost)))
+  proxySelected <- select.list(proxyList$instance_name, multiple = FALSE, title = "Select number for Reverse Proxy name", graphics = FALSE)
+
+  # Then a list of request log files is obtained, put in a dataframe, sorted, listed, and one 
+  # or several are selected. This will only include logs that are on the appliance. If logs 
+  # are archived off to another location a modified tool will be needed. 
+  # List sorted Logs for the selected Reverse Proxy
+  
+  logs <- fromJSON(pipe(sprintf("curl -s -k -H 'Accept:application/json' --user %s:%s -X GET https://%s.abc.com/wga/reverseproxy_logging/instance/%s", userId, pw, remoteHost, proxySelected)))
+  logs <- as.data.frame((logs[grep("request.log", logs$id),])$id, stringsAsFactors = F)
+  logs <- rename(logs, logs = 1)
+  logs <- sort(logs$logs, decreasing = TRUE)
+
+  # Select logs to download with a space between each selection (no commas)
+  
+  fileNames <- select.list(logs, multiple = TRUE, title = NULL, graphics = FALSE)
+
+  # Now loop through the selected logs list ('fileNames')
+  # download and process request log(s)
+  
+  for (logName in fileNames) {
+
+    # Import the log from the appliance
+    # Import log and handle error
+    
+    tryCatch({
+      fromJSON(pipe(sprintf("curl -k -s -H 'Accept:application/json' -H 'Content-Type:application/json' --user %s:%s -X GET https://%s.abc.com/wga/reverseproxy_logging/instance/%s/%s?export > req.log", userId, pw, remoteHost, proxySelected, logName)))
+      }, error=function(e){cat("ERROR ignored\n")}
+    )
+
+    # The log was saved to file as req.log. The code steps out of R, by calling a bash 
+    # script to correct common issues I have found in request logs.
+    # EXECUTE BASH SCRIPT FROM R to change selected dbl quotes to \"
+
+    system2("~/R/logAnalyzers/requestLogs/mungeData.sh")
+
+    # The script is located in the working directory. It looks like jibberish, but isn't, 
+    # and there is an explanation of what it does in the comments. A discussion is outside 
+    # the scope of this article. If you need it, Google is your friend. Here is that script:
+
+#!/bin/bash
+
+# Replace '"' with '\"', 
+# 1. skipping [space][digit][digit][digit][space]
+# 2. replacing [digit][digit]00[space]"[WORD][space] with [digit][digit]00[space]"[WORD][space]"
+# 3. replacing 00[space]" with 00[space]
+# 4. correcting any 1.1\" that were created in step 1 above to 1.1" (caused by more or less than 3 digits)
+# 5. enclosing in dbl quotes a username with [word][space][word]
+# __________________________________________________________________________
+
+#ex req.log -c ':%s#"\( [0-9][0-9][0-9] \)\@!#\\"#g | %s#\([0-9][0-9][0][0]\s\\\"[A-Z]*\s\)#\1\"#g | %s#[0][0]\s\\\"#00 #g | %s#\(1.1\)\\"#\1\"#g | %s#\(\sHTTP\/\)#" \"HTTP\/#g | %s#\s-\s\<\([A-Za-z0-9@]*\)\>\s\<\([A-Za-z0-9]*\)\>\s# - \"\1 \2\" #g' -c 'wq'
+
+# The first 10 lines of the example log given above would now look like this:
+
+#24.115.14.94 - unauthenticated 26/Oct/2018:07:41:04 -0400 GET "/" "HTTP/1.1" 302 1676
+#54.13.27.32 - unauthenticated 26/Oct/2018:07:39:04 -0400 GET "/" "HTTP/1.1" 302 1676
+#77.163.231.101 - unauthenticated 26/Oct/2018:07:40:05 -0400 GET "/" "HTTP/1.1" 302 1676
+#71.145.201.102 - unauthenticated 26/Oct/2018:07:43:04 -0400 GET "/" "HTTP/1.1" 302 1676
+#21.2.223.47 - unauthenticated 26/Oct/2018:07:40:34 -0400 GET "/EATH/css/abcd-style.css" "HTTP/1.1" 200 7032
+#62.203.13.195 - unauthenticated 26/Oct/2018:07:41:43 -0400 GET "/EATH/css/abcd-style.css" "HTTP/1.1" 200 7032
+#21.2.223.47 - unauthenticated 26/Oct/2018:07:40:34 -0400 GET "/EATH/images/favicon.png" "HTTP/1.1" 404 114
+#62.203.13.195 - unauthenticated 26/Oct/2018:07:41:43 -0400 GET "/EATH/images/favicon.png" "HTTP/1.1" 404 114
+#21.2.223.47 - unauthenticated 26/Oct/2018:07:40:34 -0400 GET "/EATH/images/brand-logo.png" "HTTP/1.1" 200 6401
+#62.203.13.195 - unauthenticated 26/Oct/2018:07:41:43 -0400 GET "/EATH/images/brand-logo.png" "HTTP/1.1" 200 6401
+
+    # Still in the 'for' loop, read the log from the saved file into a dataframe.
+    # Read in downloaded log
+
+     d <- read.table("req.log", stringsAsFactors = FALSE, fill = T)
+
+    # Add the log name to each row in the dataframe. Logs will be merged, so having 
+    # the name of which log a line came from will be useful.
+    # Add log name to dataframe
+
+    d$logName <- logName
+
+    # For the same reason, add the appliance name to each row in the dataframe.
+    # Add appliance name to dataframe
+
+    d$remoteHost <- remoteHost
+
+    # Then convert the date/time column to POSIXct.
+
+    d$V4 <- dmy_hms(d$V4, tz = "EDT")
+
+    # Create a name for the dataframe so it can be added to the list of dataframes. 
+    # Without this, a name shared by multiple logs will overwrite a prior log with 
+    # the same name in the list.
+
+    # concatenate 'log--svr' name for dataframe
+
+    SRC <- str_c(c(logName, remoteHost), collapse = "--")
+
+    # Add 'log--svr' dataframe to list of dataframes
+
+    dflist[[SRC]] <- d
+
+  } # That ends the 'for' loop - after it cycles through each selected log for the 
+    # particular appliance.
+    
+} # That ends the 'while' loop - after it cycles through each appliance.
+
+# At this point there is a list of dataframes, with each log as a dataframe. It is 
+# time to merge them into a single dataframe.
+# Combine dataframes in list of dataframes into a single dataframe
+
+df <- dplyr::bind_rows(dflist)
+
+# The combined dataframe has each log from the list of dataframes added in sequence. 
+# To see them as one log, they can be sorted by date/time.
+ 
+# sort dataframe by the POSIXct column in descending order
+# use 'rev' because '-' does not work on POSIXt objects
+# remove 'rev' to be in ascending order
+
+df <- df[rev(order(df$V4)), ]
+
+# Save the dataframe to a .csv file.
+
+write.csv(df, file = "request_log.csv", row.names = FALSE)
+
+# Check for rows with missing data.
+# show incomplete rows
+df[!complete.cases(df),]
+
+# Finally, view the dataframe.
+
+View(df)
