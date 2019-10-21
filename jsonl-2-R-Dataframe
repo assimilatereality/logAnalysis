@@ -1,0 +1,83 @@
+# Load packages
+library(jsonlite) # v. 1.5
+library(ssh)      # v. 0.3 
+library(R.utils)  # v. 2.7.0
+
+# Connect to a remote server
+session <- ssh_connect("dc2-dev-logserver-01.example.com")
+
+# Provide the directory path to the log file
+pth <- readline(prompt = "Path to file: ")
+
+# List the log files on the server
+ssh_exec_wait(session, command = paste0("ls -l pth,'/'))
+
+# Select the log to process
+logFile <- readline(prompt = "Filename: ")
+
+# Download the log
+scp_download(session,
+             paste0(pth,"/",logFile),
+             to = ".",
+             verbose = TRUE)
+
+# from R.utils, unzip the log (assuming this is a .gz compressed log)
+gunzip(logFile)
+
+# remove the '.gz' from the variable logFile name
+logFile <- gsub('.{3}$', '', logFile)
+
+# disable scientific notation globally (ahead of processing the nanosecond timestamps)
+options(scipen=999)
+
+# read in the log, convert it to a data frame, and change column names
+out <- lapply(readLines(logFile), fromJSON)
+df <- data.frame(matrix(unlist(out), nrow=length(out), byrow=T), stringsAsFactors = FALSE)
+
+## Rename the dataframe features to the Cloudflare log attribute names
+df <- dplyr::rename(df, CacheCacheStatus = X1, 
+                    CacheResponseBytes = X2,
+                    CacheResponseStatus = X3,
+                    ClientCountry = X4,
+                    ClientIP = X5,
+                    ClientIPClass = X6,
+                    ClientRequestBytes = X7,
+                    ClientRequestHost = X8,
+                    ClientRequestMethod = X9,
+                    ClientRequestURI = X10,
+                    ClientSSLCipher = X11,
+                    ClientSSLProtocol = X12,
+                    ClientSrcPort = X13,
+                    EdgeEndTimestamp = X14,
+                    EdgeRequestHost = X15,
+                    EdgeResponseBytes = X16,
+                    EdgeResponseStatus = X17,
+                    EdgeServerIP = X18,
+                    EdgeStartTimestamp = X19,
+                    OriginIP = X20,
+                    OriginResponseBytes = X21,
+                    OriginResponseStatus = X22,
+                    OriginResponseTime = X23,
+                    OriginSSLProtocol = X24,
+                    RayID = X25,
+                    WAFAction = X26,
+                    WAFFlags = X27,
+                    WAFMatchedVar = X28,
+                    WAFProfile = X29,
+                    WAFRuleID = X30,
+                    WAFRuleMessage = X31,
+                    ZoneID = X32)
+
+# convert nanotime to POSIXct
+df$EdgeStartTimestamp <- substr(df$EdgeStartTimestamp,1,nchar(df$EdgeStartTimestamp)-9)
+df$EdgeStartTimestamp <- as.numeric(df$EdgeStartTimestamp)
+df$EdgeStartTimestamp <- as.POSIXct(df$EdgeStartTimestamp, origin = '1970-01-01 00:00:00')
+
+df$EdgeEndTimestamp <- substr(df$EdgeEndTimestamp,1,nchar(df$EdgeEndTimestamp)-9)
+df$EdgeEndTimestamp <- as.numeric(df$EdgeEndTimestamp)
+df$EdgeEndTimestamp <- as.POSIXct(df$EdgeEndTimestamp, origin = '1970-01-01 00:00:00')
+
+# re-enable scientific notation globally
+options(scipen=0)
+
+# The final result is a data frame.
