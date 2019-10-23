@@ -76,8 +76,8 @@ fnScan <- function (svrNames) {
     h <- data.frame(as.list(g[[1]]))
 
     dfrst2 <- rbind(dfrst, h)
-
-    whiand run a command locally on each server. le (length(rst$cmd.out) > 1) {
+    
+    while (length(rst$cmd.out) > 1) {
       rst$cmd.out <- rst$cmd.out[-1]
       g <- strsplit(str_squish(rst$cmd.out[1]), " ")
       names(g[[1]]) <-
