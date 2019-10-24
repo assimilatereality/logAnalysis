@@ -51,11 +51,11 @@ fnScan <- function (svrNames) {
     # Uncomment the next line to have "df -Pl" printed as each server is processed
     #print(rst[["cmd.out"]])
 
-    # Drop the first row
+    # Drop the first row, which are the column headings of the command output
 
     rst$cmd.out <- rst$cmd.out[-1]
 
-    # Create an empty dataframe
+    # Create an empty dataframe and name the columns
 
     dfrst <- data.frame(matrix(ncol = 6, nrow = 0))
     x <- c("Filesystem", "Size", "Used", "Avail", "Use%", "Mounted on")
@@ -106,10 +106,8 @@ fnScan <- function (svrNames) {
 
   return(dflist) 
 
-
 } # end of function
 
-and run a command locally on each server. 
 # Create lists of servers (this could be in a separate file and brought in here with a 'source("some_file_name.R")
 
 svrNamesTDI <- c("dc1-prd-tdisvr-01",
