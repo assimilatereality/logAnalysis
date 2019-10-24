@@ -32,7 +32,6 @@ fnScan <- function (svrNames) {
    # Create empty lists used by the function
 
    dflist = list()
-   scanList = list()
 
    # Next access each server and run a command locally on each server. 
 
@@ -103,21 +102,9 @@ fnScan <- function (svrNames) {
 
   } # end of for loop
 
-  # Combine dataframes in list of dataframes to a new dataframe
-
-  df <- dplyr::bind_rows(dflist)
-
-  # Creand run a command locally on each server. ate 'datetime--svrType' name for data frame
-
-  z <- str_c(c(as.character(Sys.time()), svrType), collapse = "--")
-
-  # Add 'datetime--svr' data frame to list of data frames
-
-  scanList[[z]] <- df
-
   #return to glblScanList variable  
 
-  return(scanList) 
+  return(dflist) 
 
 
 } # end of function
