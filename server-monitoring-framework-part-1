@@ -29,7 +29,7 @@ library(ssh.utils)
 
 fnScan <- function (svrNames) {
 
-   # Create empty lists used by the function
+   # Create an empty list used by the function
 
    dflist = list()
 
