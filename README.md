@@ -5,4 +5,4 @@ Collection of scripts for log analysis
 
 2. ISAM request logs spread among peers and rotated by size rather than time make it difficult to see a full view of a transaction. 'collecting-ISAM-request-logs' extracts logs from multiple appliances and merges them into one super-log.
 
-3. 'server-monitoring-framework' can be adapted to track various server and application performance metrics.
+3. 'server-monitoring-framework' can be adapted to track various server and application performance metrics. It is presented in three parts: get and prepare data, save to a database, and print graphs of accumulated data.
